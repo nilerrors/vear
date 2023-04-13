@@ -1,0 +1,11 @@
+fn fib(n: i32) -> i32 {
+    match n {
+        n in (0, 1) => n
+        _ => fib(n - 1) + fib(n - 2)
+    }
+}
+
+fn main {
+    n := readln("Give a number: ").to_int();
+    writeln("Fibonacci of {n} is {fib(n)}");
+}
