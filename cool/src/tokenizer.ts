@@ -1,21 +1,41 @@
-import { Token } from "./token.ts";
-import { KEYWORDS } from "./builtin.ts";
+import { Token, TokenType } from "./token.ts";
+import {
+  KEYWORDS,
+  NUMBERS,
+  NUMBERS_WITH_FLOAT,
+  OPERATORS,
+  TYPES,
+} from "./builtin.ts";
+
+type TokenizeError = string;
 
 type TokenizerOptions = {
   source: string | URL;
   from: "file" | "repl";
+  mode?: "normal" | "template";
 };
 
 export class Tokenizer {
+  private fileName: string | URL;
   private input: string;
   private index: number;
   private currentChar: string | null;
   private tokens: Token[];
 
-  constructor(input: string) {
-    this.input = input;
+  constructor({ source, from }: TokenizerOptions) {
+    this.fileName = "<repl>";
+    this.input = source as string;
+    if (from != "repl") {
+      // get file
+      this.fileName = source;
+      this.input = Deno.readTextFileSync(source).replaceAll(
+        "\r\n",
+        "\n",
+      ) as string;
+    }
+
     this.index = 0;
-    this.currentChar = input.length > 0 ? input[0] : null;
+    this.currentChar = this.input.length > 0 ? this.input[0] : null;
     this.tokens = [];
   }
 
@@ -26,17 +46,74 @@ export class Tokenizer {
       : null;
   }
 
-  private addToken(type: string, value: string | null): void {
-    this.tokens.push(new Token(type, value));
+  // deno-lint-ignore no-explicit-any
+  private addToken(type: TokenType, value: any, meta?: any): void {
+    const pos = this.findLineColForByte();
+    this.tokens.push(new Token(type, value, pos.line, pos.col, meta));
   }
 
   private isEOF(): boolean {
     return this.currentChar === null;
   }
 
-  public tokenize(): Token[] | Error {
+  private findLineColForByte(index?: number): { line: number; col: number } {
+    const i = index != undefined ? index : this.index;
+    const lines = this.input.split("\n");
+    let totalLength = 0;
+    let lineStartPos = 0;
+    for (let lineNo = 0; lineNo < lines.length; lineNo++) {
+      totalLength += lines[lineNo].length + 1; // Because we removed the '\n' during split.
+      if (i < totalLength) {
+        const colNo = i - lineStartPos;
+        return { line: lineNo + 1, col: colNo + 1 };
+      }
+      lineStartPos = totalLength;
+    }
+    return { line: lineStartPos, col: 0 };
+  }
+
+  private error({
+    message,
+    extended,
+    startPosition,
+  }: {
+    message: string;
+    extended?: string;
+    startPosition?: number;
+  }): TokenizeError {
+    const pos = this.findLineColForByte();
+    let errorMessage = `  File ${this.fileName}, line ${pos.line}\n`;
+    if (startPosition != undefined) {
+      const startPos = this.findLineColForByte(startPosition);
+      if (pos.line != startPos.line) {
+        errorMessage += this.input.split("\n")[startPos.line - 1];
+        errorMessage += "\n";
+        errorMessage += "^".padStart(startPos.col - 1, " ");
+        errorMessage +=
+          "".padStart(this.input.split("\n")[startPos.line - 1].length, "^") +
+          "\n";
+      } else {
+        errorMessage += this.input.split("\n")[pos.line - 1];
+        errorMessage += "\n";
+        errorMessage += "^".padStart(startPos.col - 1, " ");
+        errorMessage += "".padStart(pos.col - startPos.col, "^") + "\n";
+      }
+    } else {
+      errorMessage += "^".padStart(pos.col, " ") + "\n";
+    }
+
+    errorMessage += message;
+    errorMessage += extended ?? "";
+    return errorMessage;
+
+    // return `error at ${this.fileName} ${pos.line}:${pos.col} -> ${message}${
+    //   extended != undefined ? "\n\t" : ""
+    // }${extended != undefined ? extended : ""}` as TokenizeError;
+  }
+
+  public tokenize(): Token[] | TokenizeError {
     if (this.currentChar === null) {
-      return new Error("");
+      Deno.exit();
     }
     while (!this.isEOF()) {
       if (this.currentChar === " " || this.currentChar === "\t") {
@@ -96,13 +173,36 @@ export class Tokenizer {
       }
 
       if (this.currentChar === "=") {
-        this.addToken("EQUALS", this.currentChar);
+        if (this.input[this.index + 1] === "=") {
+          this.addToken("OPERATOR", "==");
+          this.advance();
+          this.advance();
+          continue;
+        } else if (this.input[this.index + 1] === ">") {
+          this.addToken("ARROW", "=>");
+          this.advance();
+          this.advance();
+          continue;
+        }
+        this.addToken("OPERATOR", this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === ":") {
+        if (this.input[this.index + 1] === "=") {
+          this.addToken("OPERATOR", ":=");
+          this.advance();
+          this.advance();
+          continue;
+        }
         this.addToken("COLON", this.currentChar);
+        this.advance();
+        continue;
+      }
+
+      if (this.currentChar === ".") {
+        this.addToken("DOT", this.currentChar);
         this.advance();
         continue;
       }
@@ -113,26 +213,50 @@ export class Tokenizer {
         continue;
       }
 
-      if (this.currentChar === "-") {
-        if (this.input[this.index + 1] === ">") {
+      if (OPERATORS.includes(this.currentChar)) {
+        if (this.currentChar === "-" && this.input[this.index + 1] === ">") {
           this.addToken("ARROW", "->");
           this.advance();
           this.advance();
           continue;
-        } else {
-          return new Error(`Unexpected character: ${this.currentChar}`);
         }
+        if (this.currentChar === ">" && this.input[this.index + 1] === "=") {
+          this.addToken("OPERATOR", ">=");
+          this.advance();
+          this.advance();
+          continue;
+        }
+        if (this.currentChar === "<" && this.input[this.index + 1] === "=") {
+          this.addToken("OPERATOR", "<=");
+          this.advance();
+          this.advance();
+          continue;
+        }
+        if (this.currentChar === "<" && this.input[this.index + 1] === "-") {
+          this.addToken("ARROW", "<-");
+          this.advance();
+          this.advance();
+          continue;
+        }
+        this.addToken("OPERATOR", this.currentChar);
+        this.advance();
+        continue;
       }
 
       if (this.currentChar === "'") {
         let value = "";
         this.advance();
-        while (!this.isEOF() && this.currentChar !== "'") {
+        while (
+          !this.isEOF() && this.currentChar !== "'" && this.currentChar !== "\n"
+        ) {
           value += this.currentChar;
           this.advance();
         }
-        if (this.isEOF()) {
-          return new Error("Unterminated string literal");
+        if (this.isEOF() || this.currentChar === "\n") {
+          return this.error({
+            message: "Syntax Error: unterminated string literal",
+            startPosition: this.index - value.length,
+          });
         }
         this.advance();
         this.addToken("STRING", value);
@@ -147,7 +271,9 @@ export class Tokenizer {
           this.advance();
         }
         if (this.isEOF()) {
-          return new Error("Unterminated template literal");
+          return this.error({
+            message: "Syntax Error: unterminated template literal",
+          });
         }
         this.advance();
         this.addToken("TEMPLATE_LITERAL", value);
@@ -163,18 +289,33 @@ export class Tokenizer {
           value += this.currentChar;
           this.advance();
         }
-
-        this.addToken("IDENTIFIER", value);
+        this.addToken(
+          KEYWORDS.includes(value)
+            ? "KEYWORD"
+            : TYPES.includes(value)
+            ? "TYPE"
+            : "IDENTIFIER",
+          value,
+        );
         continue;
       }
 
-      if (this.currentChar.match(/[0-9]/)) {
+      if (NUMBERS_WITH_FLOAT.includes(this.currentChar)) {
         let value = "";
         while (
-          !this.isEOF() && this.currentChar && this.currentChar.match(/[0-9.]/)
+          !this.isEOF() && this.currentChar &&
+          NUMBERS_WITH_FLOAT.includes(this.currentChar)
         ) {
           value += this.currentChar;
           this.advance();
+        }
+        if (
+          value.split("").filter((v) => NUMBERS.includes(v)).toString() == ""
+        ) {
+          return this.error({
+            message: "Syntax Error: invalid syntax",
+            startPosition: this.index - value.length,
+          });
         }
         if (value.includes(".")) {
           this.addToken("FLOAT", value);
@@ -184,7 +325,9 @@ export class Tokenizer {
         continue;
       }
 
-      return new Error(`Unexpected character: ${this.currentChar}`);
+      return this.error({
+        message: `Syntax Error: unexpected character '${this.currentChar}'`,
+      });
     }
 
     this.addToken("EOF", null);

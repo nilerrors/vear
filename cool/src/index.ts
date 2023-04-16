@@ -1,36 +1,23 @@
 // import { Lexer } from "./lexer.ts";
+import { Parser } from "./parser.ts";
 import { Tokenizer } from "./tokenizer.ts";
 
 async function main() {
-  const input = `
-# This is a comment
-struct Person {
-  name: str
-  age: i16
-  city: str
-}
-
-
-fn main() {
-  let person1 = {
-    name: 'John'
-    age: 30
-    city: 'New York'
+  const input = `#this is crazy`;
+  // const command = Deno.args[0];
+  const file = Deno.args[1];
+  console.log(Deno.args);
+  const lex = new Tokenizer({ source: input, from: "repl" });
+  const tokens = lex.tokenize();
+  if (typeof tokens == "string") {
+    console.log(tokens);
+    Deno.exit();
   }
-
-  let person2 = {
-    name: 'Doe'
-    age: 31
-    city: 'LA'
-  }
-
-  writeln("Person1 and Person2 combined are {person1.age + person2.age} years old")
-}
-
-
-`;
-  const lex = new Tokenizer(input);
-  console.log(lex.tokenize());
+  const parser = new Parser(tokens);
+  const ast = parser.parse();
+  const transpiler = new JSTranpsiler(ast);
+  console.log(transpiler.transpile())
+  console.log(ast);
 }
 
 await main();

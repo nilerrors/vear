@@ -1,2 +1,2 @@
 deno fmt
-deno run --allow-net .\src\index.ts
+deno run --allow-net --allow-read .\src\index.ts run .\test\main.cool

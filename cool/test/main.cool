@@ -1,0 +1,31 @@
+# This is a comment
+struct Person {
+  name str
+  age i16
+  city str
+}
+
+
+fn main() {
+  let person1 = Person{
+    name 'John'
+    age 30
+    city 'New York'
+  }
+
+  let person2 = Person{
+    name 'Doe'
+    age 31
+    city 'LA'
+  }
+
+  if person1.age > person2.age {
+    writeln("Person1 is older than Person2")
+  } elif person1.age < person2.age {
+    writeln("Person1 is younger than Person2")
+  } else {
+    writeln("Person1 and Person2 are the same age")
+  }
+
+  writeln("Person1 and Person2 combined are {person1.age + person2.age} years old")
+}
