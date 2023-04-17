@@ -1,23 +1,41 @@
+// deno-lint-ignore-file no-unused-vars
 // import { Lexer } from "./lexer.ts";
 import { Parser } from "./parser.ts";
 import { Tokenizer } from "./tokenizer.ts";
+import { JSTranspiler } from "./transpiler.ts";
 
-async function main() {
-  const input = `#this is crazy`;
+function main() {
+  const input = `
+#this is crazy
+
+use 'math':{
+  tan
+  sin
+
+
+    }
+
+`;
   // const command = Deno.args[0];
   const file = Deno.args[1];
-  console.log(Deno.args);
   const lex = new Tokenizer({ source: input, from: "repl" });
   const tokens = lex.tokenize();
   if (typeof tokens == "string") {
     console.log(tokens);
     Deno.exit();
   }
-  const parser = new Parser(tokens);
+  const parser = new Parser({ tokens, filename: "<repl>" });
   const ast = parser.parse();
-  const transpiler = new JSTranpsiler(ast);
-  console.log(transpiler.transpile())
+  if (typeof ast == "string") {
+    console.log(ast);
+    Deno.exit();
+  }
+  const transpiler = new JSTranspiler(ast);
+  // console.log(transpiler.transpile());
+  ast.children = ast.children?.filter((t) =>
+    !["Newline", "Comment", "Spacing"].includes(t.type)
+  );
   console.log(ast);
 }
 
-await main();
+main();

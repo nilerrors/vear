@@ -1,6 +1,8 @@
 import { KEYWORDS } from "./builtin.ts";
 
 export type TokenType =
+  | "SPACING"
+  | "NEWLINE"
   | "COMMENT"
   | "IDENTIFIER"
   | "KEYWORD"
@@ -28,7 +30,10 @@ export class Token {
     public type: TokenType,
     // deno-lint-ignore no-explicit-any
     public value: typeof KEYWORDS[number] | any,
-    public line: number,
+    public line: {
+      num: number;
+      value: string;
+    },
     public column: number,
     // deno-lint-ignore no-explicit-any
     public meta?: any,

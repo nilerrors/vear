@@ -49,7 +49,18 @@ export class Tokenizer {
   // deno-lint-ignore no-explicit-any
   private addToken(type: TokenType, value: any, meta?: any): void {
     const pos = this.findLineColForByte();
-    this.tokens.push(new Token(type, value, pos.line, pos.col, meta));
+    this.tokens.push(
+      new Token(
+        type,
+        value,
+        {
+          num: pos.line,
+          value: this.input.split("\n")[pos.line - 1],
+        },
+        pos.col,
+        meta,
+      ),
+    );
   }
 
   private isEOF(): boolean {
@@ -117,11 +128,13 @@ export class Tokenizer {
     }
     while (!this.isEOF()) {
       if (this.currentChar === " " || this.currentChar === "\t") {
+        this.addToken("SPACING", this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === "\n") {
+        this.addToken("NEWLINE", this.currentChar);
         this.advance();
         continue;
       }
@@ -290,9 +303,9 @@ export class Tokenizer {
           this.advance();
         }
         this.addToken(
-          KEYWORDS.includes(value)
+          KEYWORDS.includes(value as typeof KEYWORDS[number])
             ? "KEYWORD"
-            : TYPES.includes(value)
+            : TYPES.includes(value as typeof TYPES[number])
             ? "TYPE"
             : "IDENTIFIER",
           value,
@@ -300,11 +313,17 @@ export class Tokenizer {
         continue;
       }
 
-      if (NUMBERS_WITH_FLOAT.includes(this.currentChar)) {
+      if (
+        NUMBERS_WITH_FLOAT.includes(
+          this.currentChar as typeof NUMBERS_WITH_FLOAT[number],
+        )
+      ) {
         let value = "";
         while (
           !this.isEOF() && this.currentChar &&
-          NUMBERS_WITH_FLOAT.includes(this.currentChar)
+          NUMBERS_WITH_FLOAT.includes(
+            this.currentChar as typeof NUMBERS_WITH_FLOAT[number],
+          )
         ) {
           value += this.currentChar;
           this.advance();
