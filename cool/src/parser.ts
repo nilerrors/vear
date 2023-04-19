@@ -1,50 +1,3 @@
-/*import { Token } from "./token.ts";
-
-export class Parser {
-  private js_code: string;
-  private tokens: Token[];
-  private index: number;
-  private currentToken: Token | null;
-
-  constructor(tokens: Token[]) {
-    this.js_code = "";
-    this.tokens = tokens;
-    this.index = 0;
-    this.currentToken = tokens.length > 0 ? tokens[0] : null;
-  }
-
-  private advance() {
-    this.index++;
-  }
-
-  private peek(times?: number) {
-    const token = this.tokens[this.index + (times ?? 1)];
-    if (token.type == "EOF") return null;
-    return token;
-  }
-
-  compile(): string {
-    if (this.tokens.length == 0 && this.currentToken != null) return "";
-
-    while (this.currentToken != null && this.currentToken.type != "EOF") {
-      if (this.currentToken.type == "COMMENT") {
-        this.advance();
-        continue;
-      }
-      if (this.currentToken.type == "STRING") {
-        this.js_code += `"${this.currentToken.value}"`;
-        this.advance();
-        continue;
-      }
-      if (this.currentToken.type == "KEYWORD") {
-
-      }
-    }
-    return this.js_code;
-  }
-}
-*/
-
 import { KEYWORDS } from "./builtin.ts";
 import { Token, TokenType } from "./token.ts";
 import { Tokenizer } from "./tokenizer.ts";
@@ -56,12 +9,35 @@ type ParserOptions = {
   filename?: string | URL;
 };
 
-export type ASTNode = {
-  type: string;
+export enum NodeType {
+  PROGRAM = "PROGRAM",
+  NEWLINE = "NEWLINE",
+  SPACING = "SPACING",
+  COMMENT = "COMMENT",
+  IMPORT = "IMPORT",
+  FN = "FN",
+  ENUM = "ENUM",
+  ENUM_VAL = "ENUM_VAL",
+}
+
+export class ASTNode {
+  type: NodeType;
   value?: any;
   meta?: any;
   children?: ASTNode[];
-};
+
+  constructor({ type, value, meta, children }: {
+    type: NodeType;
+    value?: any;
+    meta?: any;
+    children?: ASTNode[];
+  }) {
+    this.type = type;
+    this.value = value;
+    this.meta = meta;
+    this.children = children;
+  }
+}
 
 export class Parser {
   private filename: string | URL;
@@ -76,12 +52,37 @@ export class Parser {
     this.currentToken = tokens[0];
     this.index = 0;
     this.ast = {
-      type: "Program",
+      type: NodeType.PROGRAM,
       value: {
         source: this.filename,
       },
       children: [],
     };
+  }
+
+  private error(
+    message: string,
+  ): ParserError {
+    const startPos = {
+      line: this.currentToken.at.line.num,
+      column: this.currentToken.at.column - this.currentToken.value.length,
+    };
+    let errorMessage =
+      `Error at file ${this.filename}, line ${this.currentToken.at.line.num}\n`;
+    errorMessage += this.currentToken.at.line.value + "\n";
+    if (this.currentToken.at.line.num != startPos.line) {
+      // handle multiline errors
+    } else {
+      // console.log(startPos);
+      // console.log(this.currentToken);
+      errorMessage += "".padStart(startPos.column - 1, " ");
+      errorMessage +=
+        "".padStart(this.currentToken.at.column - startPos.column, "^") +
+        "\n";
+    }
+
+    errorMessage += message;
+    return errorMessage;
   }
 
   private advance(to = -1): void {
@@ -91,13 +92,13 @@ export class Parser {
     this.currentToken = this.tokens[this.index];
   }
 
-  private consume(type: TokenType): Token {
+  private consume(type: TokenType): Token | ParserError {
     if (this.currentToken.type === type) {
       const token = this.currentToken;
       this.advance();
       return token;
     } else {
-      throw new Error(
+      return this.error(
         `Expected ${type} token, but got ${this.currentToken.type} token`,
       );
     }
@@ -105,7 +106,7 @@ export class Parser {
 
   private peek(
     times = 1,
-    exclude = ["EOF", "COMMENT", "SPACING"],
+    exclude = ["EOF", "COMMENT", NodeType.SPACING],
   ): { token: Token; index: number } | undefined {
     let index: number = this.index;
     const allowed_tokens = this.tokens.filter((t, i) => {
@@ -119,90 +120,97 @@ export class Parser {
     }
   }
 
+  private skipSpacingNewlines(): number {
+    let totalSkipped = 0;
+    while (["NEWLINE", NodeType.SPACING].includes(this.currentToken.type)) {
+      this.advance();
+      totalSkipped++;
+    }
+    return totalSkipped;
+  }
+
   private skipSpacing() {
-    while (this.currentToken.type == "SPACING") {
+    while (this.currentToken.type == TokenType.SPACING) {
       this.advance();
     }
   }
 
   private skipNewlines() {
-    while (this.currentToken.type == "NEWLINE") {
+    while (this.currentToken.type == TokenType.NEWLINE) {
       this.advance();
     }
   }
 
-  private error(message: string): ParserError {
-    let errorMessage =
-      `Error at file ${this.filename}, line ${this.currentToken.line.num}\n`;
-    errorMessage += this.currentToken.line.value + "\n";
-    errorMessage += "^".padStart(this.currentToken.column - 1, " ") + "\n";
-    errorMessage += message;
-    return errorMessage;
-  }
-
   private parseComment(): ASTNode {
-    const node: ASTNode = {
-      type: "Comment",
+    const node: ASTNode = new ASTNode({
+      type: NodeType.COMMENT,
       value: {
         token: this.currentToken,
       },
-    };
-    this.consume("COMMENT");
+    });
+    this.consume(TokenType.COMMENT);
     return node;
   }
 
   private parseInclude(): ASTNode | ParserError {
-    const node: ASTNode = {
-      type: "Import",
+    const node: ASTNode = new ASTNode({
+      type: NodeType.IMPORT,
       value: {
         token: this.currentToken,
       },
-    };
-    this.consume("KEYWORD");
-    this.skipSpacing();
+    });
+    this.consume(TokenType.KEYWORD);
+    this.skipSpacingNewlines();
     const from_string = this.peek();
-    if (from_string == undefined) {
-      return this.error("how the hell");
+    if (from_string?.token.type != TokenType.STRING) {
+      return this.error(
+        `Syntax Error: expected string, got '${from_string?.token.type}'`,
+      );
     }
-    if (from_string.token.type == "STRING") {
-      this.consume("STRING");
-      node.value.from = from_string;
+    this.consume(TokenType.STRING);
+    node.value.from = {
+      from: from_string?.token.value,
+      token: from_string?.token,
+    };
+    this.skipSpacing();
+    if (this.peek()?.token.type == TokenType.COLON) {
+      // specified includes
+      this.consume(TokenType.COLON);
       this.skipSpacing();
-      if (this.peek()?.token.type == "COLON") {
-        // specified includes
-        this.consume("COLON");
-        this.skipSpacing();
-        if (this.peek()?.token.type != "LBRACE") {
-          return this.error("Syntax Error: invalid syntax");
-        }
-        this.consume("LBRACE");
-        while (this.currentToken.type != "RBRACE") {
-          this.skipSpacing();
-          this.skipNewlines();
-          if (
-            this.currentToken.type == "OPERATOR" &&
-            this.currentToken.value == "*"
-          ) {
-            if (node.value.includes.length > 0) {
-              return this.error("Syntax Error: invalid syntax");
-            }
-            node.value.includes = {
-              everything: true,
-            };
-            this.consume("OPERATOR");
-            break;
-          }
-          if (this.currentToken.type == "IDENTIFIER") {
-            if (node.value.includes == undefined) {
-              node.value.includes = [];
-            }
-            node.value.includes.push(this.currentToken.value);
-            this.consume("IDENTIFIER");
-          }
-        }
-        this.consume("RBRACE");
-        // return this.error("specified includes not implemented yet");
+      if (this.peek()?.token.type != TokenType.LBRACE) {
+        return this.error("Syntax Error: invalid syntax");
       }
+      this.consume(TokenType.LBRACE);
+      while (this.currentToken.type != TokenType.RBRACE) {
+        this.skipSpacingNewlines();
+        if (
+          this.currentToken.type == TokenType.OPERATOR &&
+          this.currentToken.value == "*"
+        ) {
+          if (node.value.includes && node.value.includes.length > 0) {
+            return this.error("Syntax Error: invalid syntax");
+          }
+          node.value.includes = {
+            everything: true,
+          };
+          this.consume(TokenType.OPERATOR);
+          this.skipSpacingNewlines();
+          break;
+        }
+        if (this.currentToken.type != TokenType.IDENTIFIER) {
+          return this.error(
+            `Syntax Error: expected identifier, got '${this.currentToken.type}'`,
+          );
+        }
+        if (node.value.includes == undefined) {
+          node.value.includes = [];
+        }
+        node.value.includes.push(this.currentToken.value);
+        this.consume(TokenType.IDENTIFIER);
+        this.skipSpacingNewlines();
+      }
+      this.consume(TokenType.RBRACE);
+      // return this.error("specified includes not implemented yet");
     }
 
     return node;
@@ -212,50 +220,244 @@ export class Parser {
     return this.error("variables not implemented");
   }
 
+  private parseEnumDeclaration(): ASTNode | ParserError {
+    const node: ASTNode = new ASTNode({
+      type: NodeType.ENUM,
+    });
+    this.consume(TokenType.KEYWORD);
+    this.skipSpacingNewlines();
+    const enumName = this.peek();
+    if (enumName?.token.type != TokenType.IDENTIFIER) {
+      return this.error(
+        `Syntax Error: expected enum name, got '${enumName?.token.type}'`,
+      );
+    }
+    this.consume(TokenType.IDENTIFIER);
+    this.skipSpacingNewlines();
+    if (this.peek()?.token.type != TokenType.LBRACE) {
+      return this.error(
+        `Syntax Error: expected '{', got ${this.currentToken.type}`,
+      );
+    }
+    this.consume(TokenType.LBRACE);
+    while (this.currentToken.type != TokenType.RBRACE) {
+      this.skipSpacingNewlines();
+      const enum_val = this.currentToken;
+      if (enum_val.type != TokenType.IDENTIFIER) {
+        return this.error(
+          `Syntax Error: expected enum value, got '${enum_val.type}'`,
+        );
+      }
+      this.consume(TokenType.IDENTIFIER);
+      if (!node.children) {
+        node.children = [];
+      }
+      node.children.push(
+        new ASTNode({
+          type: NodeType.ENUM_VAL,
+          value: {
+            name: {
+              name: enum_val.value,
+              token: enum_val,
+            },
+          },
+        }),
+      );
+      this.skipSpacingNewlines();
+    }
+    this.consume(TokenType.RBRACE);
+    node.value = {
+      name: {
+        name: enumName.token.value,
+        token: enumName.token,
+      },
+    };
+    return node;
+  }
+
+  private parseFunction(): ASTNode | ParserError {
+    const node: ASTNode = new ASTNode({
+      type: NodeType.FN,
+    });
+
+    this.consume(TokenType.KEYWORD);
+    this.skipSpacingNewlines();
+    const fnName = this.peek();
+    if (fnName?.token.type != TokenType.IDENTIFIER) {
+      this.advance();
+      return this.error(
+        `Syntax Error: function name expected, got '${fnName?.token.value}'`,
+      );
+    }
+    this.consume(TokenType.IDENTIFIER);
+    node.value = {
+      name: {
+        name: fnName.token.value,
+        token: fnName.token,
+      },
+    };
+    this.skipSpacingNewlines();
+    const lParenParameters = this.peek();
+    if (lParenParameters?.token.type != TokenType.LPAREN) {
+      this.advance();
+      return this.error(
+        `Syntax Error: expected '(', got '${lParenParameters?.token.value}'`,
+      );
+    }
+    this.consume(TokenType.LPAREN);
+    this.skipSpacingNewlines();
+    while (this.currentToken.type != TokenType.RPAREN) {
+      this.skipSpacingNewlines();
+      const parameterName = this.currentToken;
+      if (parameterName.type != TokenType.IDENTIFIER) {
+        this.advance();
+        return this.error(
+          `Syntax Error: expected paramater name, got '${parameterName.value}'`,
+        );
+      }
+      if (!node.value.paramaters) node.value.paramaters = [];
+      this.consume(TokenType.IDENTIFIER);
+      this.skipSpacingNewlines();
+      const parameterType = this.currentToken;
+      if (
+        parameterType.type != TokenType.IDENTIFIER &&
+        parameterType.type != TokenType.TYPE
+      ) {
+        this.advance();
+        return this.error(
+          `Syntax Error: expected type, got '${parameterType.value}'`,
+        );
+      }
+      this.consume(parameterType.type);
+
+      node.value.paramaters.push({
+        name: {
+          name: parameterName.value,
+          token: parameterName,
+        },
+        type: {
+          name: parameterType.value,
+          token: parameterType,
+        },
+      });
+    }
+    this.consume(TokenType.RPAREN);
+    this.skipSpacingNewlines();
+    const fnReturnType = this.peek();
+    if (
+      fnReturnType?.token.type == TokenType.IDENTIFIER ||
+      fnReturnType?.token.type == TokenType.TYPE
+    ) {
+      this.advance();
+      this.consume(fnReturnType.token.type);
+      node.value.returnType = {
+        type: fnReturnType.token.value,
+        token: fnReturnType.token,
+      };
+    }
+    const fnArrow = this.peek();
+    if (
+      fnArrow?.token.type == TokenType.ARROW && fnArrow?.token.value == "->"
+    ) {
+      // handle arrowed function
+      // auto-returns the one value
+      this.advance();
+      this.consume(TokenType.ARROW);
+      node.children = [];
+      node.meta = {
+        ended: true,
+      };
+      return this.error("no yet implemented");
+    } else {
+      const block = this.parseBlock();
+      if (typeof block == "string") {
+        return block;
+      }
+      node.children = block;
+    }
+
+    // handle rest of function
+
+    return node;
+  }
+
   private parseKeyword(): ASTNode | ParserError {
     switch (this.currentToken.value as typeof KEYWORDS[number]) {
       case "use":
         return this.parseInclude();
       case "let":
         return this.parseVariableDeclarationAssignment();
+      case "fn":
+        return this.parseFunction();
+      case "enum":
+        return this.parseEnumDeclaration();
     }
     return this.error(`unexpected keyword name: ${this.currentToken.value}`);
   }
 
   private parseSpacing(): ASTNode | ParserError {
-    if (!["NEWLINE", "SPACING"].includes(this.currentToken.type)) {
+    if (
+      this.currentToken.type != TokenType.NEWLINE &&
+      this.currentToken.type != TokenType.SPACING
+    ) {
       return this.error(`unexpected spacing: ${this.currentToken.value}`);
     }
-    const node: ASTNode = {
-      type: this.currentToken.type == "NEWLINE" ? "Newline" : "Spacing",
+    const node: ASTNode = new ASTNode({
+      type: this.currentToken.type == TokenType.NEWLINE
+        ? NodeType.NEWLINE
+        : NodeType.SPACING,
       value: this.currentToken,
-    };
+    });
     this.consume(this.currentToken.type);
     return node;
   }
 
+  private parseBlock(): ASTNode[] | ParserError {
+    const statements: ASTNode[] = [];
+    this.skipSpacingNewlines();
+    if (this.currentToken.type != TokenType.LBRACE) {
+      this.advance();
+    }
+    this.consume(TokenType.LBRACE);
+    while (this.currentToken.type != TokenType.RBRACE) {
+      const statement = this.parseExpression();
+      if (!statement) continue;
+      if (typeof statement == "string") return statement;
+      statements.push(statement);
+    }
+    this.consume(TokenType.RBRACE);
+    return statements;
+  }
+
   private parseExpression(): ASTNode | ParserError | undefined {
     switch (this.currentToken.type) {
-      case "NEWLINE":
-      case "SPACING":
+      case TokenType.NEWLINE:
+      case TokenType.SPACING:
         return this.parseSpacing();
-      case "COMMENT":
+      case TokenType.COMMENT:
         return this.parseComment();
-      case "KEYWORD":
+      case TokenType.KEYWORD:
         return this.parseKeyword();
     }
 
-    return this.error(`unexpected token: ${this.currentToken.type}`);
+    return this.error(
+      `Syntax Error: unexpected token: '${this.currentToken.type}'`,
+    );
   }
 
   public parse(): ASTNode | ParserError {
-    while (this.index < this.tokens.length && this.currentToken.type != "EOF") {
+    while (
+      this.index < this.tokens.length && this.currentToken.type != TokenType.EOF
+    ) {
       const expression = this.parseExpression();
-      if (!expression) continue;
+      if (expression == undefined) continue;
       if (typeof expression === "string") {
         return expression;
       }
-      this.ast?.children?.push(expression);
+      if (!this.ast.children) {
+        this.ast.children = [];
+      }
+      this.ast?.children.push(expression);
     }
     return this.ast;
   }

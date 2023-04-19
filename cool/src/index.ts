@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-unused-vars
 // import { Lexer } from "./lexer.ts";
+import { Formatter } from "./format.ts";
 import { Parser } from "./parser.ts";
 import { Tokenizer } from "./tokenizer.ts";
 import { JSTranspiler } from "./transpiler.ts";
@@ -9,11 +10,28 @@ function main() {
 #this is crazy
 
 use 'math':{
-  tan
-  sin
+  *
+}
 
+enum Direction {
+  NORTH
+  WEST
+  SOUTH
+  EAST
+}
 
+fn main (this str) str {
+  fn name() str {
+    fn age() i8 {
+      fn hello() str {
+
+      }
     }
+  }
+  fn hi() str {
+
+  }
+}
 
 `;
   // const command = Deno.args[0];
@@ -33,9 +51,12 @@ use 'math':{
   const transpiler = new JSTranspiler(ast);
   // console.log(transpiler.transpile());
   ast.children = ast.children?.filter((t) =>
-    !["Newline", "Comment", "Spacing"].includes(t.type)
+    !["NEWLINE", "COMMENT", "SPACING"].includes(t.type)
   );
-  console.log(ast);
+  // console.log(ast);
+  const formatter = new Formatter(ast);
+  console.log(formatter.format());
+  // Deno.writeTextFile("./file.ast.json", JSON.stringify(ast, undefined, 2));
 }
 
 main();

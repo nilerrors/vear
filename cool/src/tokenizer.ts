@@ -17,6 +17,7 @@ type TokenizerOptions = {
 
 export class Tokenizer {
   private fileName: string | URL;
+  private from: string;
   private input: string;
   private index: number;
   private currentChar: string | null;
@@ -54,10 +55,13 @@ export class Tokenizer {
         type,
         value,
         {
-          num: pos.line,
-          value: this.input.split("\n")[pos.line - 1],
+          line: {
+            num: pos.line,
+            value: this.input.split("\n")[pos.line - 1],
+          },
+          column: pos.col,
+          file: this.from == "repl" ? "<repl>" : this.fileName,
         },
-        pos.col,
         meta,
       ),
     );
@@ -128,13 +132,13 @@ export class Tokenizer {
     }
     while (!this.isEOF()) {
       if (this.currentChar === " " || this.currentChar === "\t") {
-        this.addToken("SPACING", this.currentChar);
+        this.addToken(TokenType.SPACING, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === "\n") {
-        this.addToken("NEWLINE", this.currentChar);
+        this.addToken(TokenType.NEWLINE, this.currentChar);
         this.advance();
         continue;
       }
@@ -145,113 +149,113 @@ export class Tokenizer {
           value += this.currentChar;
           this.advance();
         }
-        this.addToken("COMMENT", value.trim());
+        this.addToken(TokenType.COMMENT, value.trim());
         continue;
       }
 
       if (this.currentChar === "{") {
-        this.addToken("LBRACE", this.currentChar);
+        this.addToken(TokenType.LBRACE, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === "}") {
-        this.addToken("RBRACE", this.currentChar);
+        this.addToken(TokenType.RBRACE, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === "(") {
-        this.addToken("LPAREN", this.currentChar);
+        this.addToken(TokenType.LPAREN, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === ")") {
-        this.addToken("RPAREN", this.currentChar);
+        this.addToken(TokenType.RPAREN, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === "[") {
-        this.addToken("LBRACKET", this.currentChar);
+        this.addToken(TokenType.LBRACKET, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === "]") {
-        this.addToken("RBRACKET", this.currentChar);
+        this.addToken(TokenType.RBRACKET, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === "=") {
         if (this.input[this.index + 1] === "=") {
-          this.addToken("OPERATOR", "==");
+          this.addToken(TokenType.OPERATOR, "==");
           this.advance();
           this.advance();
           continue;
         } else if (this.input[this.index + 1] === ">") {
-          this.addToken("ARROW", "=>");
+          this.addToken(TokenType.ARROW, "=>");
           this.advance();
           this.advance();
           continue;
         }
-        this.addToken("OPERATOR", this.currentChar);
+        this.addToken(TokenType.OPERATOR, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === ":") {
         if (this.input[this.index + 1] === "=") {
-          this.addToken("OPERATOR", ":=");
+          this.addToken(TokenType.OPERATOR, ":=");
           this.advance();
           this.advance();
           continue;
         }
-        this.addToken("COLON", this.currentChar);
+        this.addToken(TokenType.COLON, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === ".") {
-        this.addToken("DOT", this.currentChar);
+        this.addToken(TokenType.DOT, this.currentChar);
         this.advance();
         continue;
       }
 
       if (this.currentChar === ",") {
-        this.addToken("COMMA", this.currentChar);
+        this.addToken(TokenType.COMMA, this.currentChar);
         this.advance();
         continue;
       }
 
       if (OPERATORS.includes(this.currentChar)) {
         if (this.currentChar === "-" && this.input[this.index + 1] === ">") {
-          this.addToken("ARROW", "->");
+          this.addToken(TokenType.ARROW, "->");
           this.advance();
           this.advance();
           continue;
         }
         if (this.currentChar === ">" && this.input[this.index + 1] === "=") {
-          this.addToken("OPERATOR", ">=");
+          this.addToken(TokenType.OPERATOR, ">=");
           this.advance();
           this.advance();
           continue;
         }
         if (this.currentChar === "<" && this.input[this.index + 1] === "=") {
-          this.addToken("OPERATOR", "<=");
+          this.addToken(TokenType.OPERATOR, "<=");
           this.advance();
           this.advance();
           continue;
         }
         if (this.currentChar === "<" && this.input[this.index + 1] === "-") {
-          this.addToken("ARROW", "<-");
+          this.addToken(TokenType.ARROW, "<-");
           this.advance();
           this.advance();
           continue;
         }
-        this.addToken("OPERATOR", this.currentChar);
+        this.addToken(TokenType.OPERATOR, this.currentChar);
         this.advance();
         continue;
       }
@@ -272,7 +276,7 @@ export class Tokenizer {
           });
         }
         this.advance();
-        this.addToken("STRING", value);
+        this.addToken(TokenType.STRING, value);
         continue;
       }
 
@@ -289,7 +293,7 @@ export class Tokenizer {
           });
         }
         this.advance();
-        this.addToken("TEMPLATE_LITERAL", value);
+        this.addToken(TokenType.TEMPLATE_LITERAL, value);
         continue;
       }
 
@@ -304,10 +308,10 @@ export class Tokenizer {
         }
         this.addToken(
           KEYWORDS.includes(value as typeof KEYWORDS[number])
-            ? "KEYWORD"
+            ? TokenType.KEYWORD
             : TYPES.includes(value as typeof TYPES[number])
-            ? "TYPE"
-            : "IDENTIFIER",
+            ? TokenType.TYPE
+            : TokenType.IDENTIFIER,
           value,
         );
         continue;
@@ -337,9 +341,9 @@ export class Tokenizer {
           });
         }
         if (value.includes(".")) {
-          this.addToken("FLOAT", value);
+          this.addToken(TokenType.FLOAT, value);
         } else {
-          this.addToken("INTEGER", value);
+          this.addToken(TokenType.INTEGER, value);
         }
         continue;
       }
@@ -349,7 +353,7 @@ export class Tokenizer {
       });
     }
 
-    this.addToken("EOF", null);
+    this.addToken(TokenType.EOF, null);
 
     return this.tokens;
   }
